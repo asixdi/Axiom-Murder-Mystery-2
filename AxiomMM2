@@ -1,0 +1,460 @@
+-- MM2 CHEAT SUITE | ESP + SPEEDHACK + FLY + SPINBOT
+-- Axiom Build
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ══════════════════════════════════════
+--              CONFIG
+-- ══════════════════════════════════════
+local Config = {
+    ESP = {
+        Enabled = true,
+        ShowPlayers = true,
+        ShowBoxes = true,
+        ShowNames = true,
+        ShowDistance = true,
+        ShowRole = true,
+        KillerColor = Color3.fromRGB(255, 50, 50),
+        InnocentColor = Color3.fromRGB(50, 255, 100),
+        SheriffColor = Color3.fromRGB(50, 150, 255),
+        SelfColor = Color3.fromRGB(255, 255, 0),
+        MaxDistance = 1000,
+    },
+    SpeedHack = {
+        Enabled = false,
+        Speed = 50,
+        DefaultSpeed = 16,
+    },
+    Fly = {
+        Enabled = false,
+        Speed = 80,
+    },
+    SpinBot = {
+        Enabled = false,
+        Speed = 25,
+    },
+}
+
+-- ══════════════════════════════════════
+--              STATE
+-- ══════════════════════════════════════
+local ESPObjects = {}
+local FlyConnection = nil
+local SpinConnection = nil
+local BodyVelocity = nil
+local BodyGyro = nil
+local SpinAngle = 0
+
+-- ══════════════════════════════════════
+--              UTILITIES
+-- ══════════════════════════════════════
+local function GetCharacter(player)
+    return player and player.Character
+end
+
+local function GetRootPart(player)
+    local char = GetCharacter(player)
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetRole(player)
+    local ok, role = pcall(function()
+        return player:FindFirstChild("mmRole") and player.mmRole.Value
+            or (player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Role") and player.leaderstats.Role.Value)
+            or "Unknown"
+    end)
+    return ok and role or "Unknown"
+end
+
+local function GetRoleColor(role)
+    role = tostring(role):lower()
+    if role:find("murder") or role:find("killer") then
+        return Config.ESP.KillerColor
+    elseif role:find("sheriff") then
+        return Config.ESP.SheriffColor
+    else
+        return Config.ESP.InnocentColor
+    end
+end
+
+local function WorldToViewport(pos)
+    local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+    return Vector2.new(screenPos.X, screenPos.Y), screenPos.Z, onScreen
+end
+
+local function GetBoundingBox(character)
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local height = humanoid and humanoid.HipHeight * 2 + 1 or 5.5
+    return rootPart.Position, height
+end
+
+-- ══════════════════════════════════════
+--              ESP SYSTEM
+-- ══════════════════════════════════════
+local function CreateESPForPlayer(player)
+    if player == LocalPlayer then return end
+
+    local drawings = {}
+
+    -- Box (4 lines)
+    for i = 1, 4 do
+        local line = Drawing.new("Line")
+        line.Thickness = 1.5
+        line.Color = Color3.fromRGB(255,255,255)
+        line.Visible = false
+        line.ZIndex = 5
+        drawings["BoxLine"..i] = line
+    end
+
+    -- Name
+    local nameText = Drawing.new("Text")
+    nameText.Size = 13
+    nameText.Center = true
+    nameText.Outline = true
+    nameText.Color = Color3.fromRGB(255,255,255)
+    nameText.Visible = false
+    nameText.ZIndex = 6
+    drawings.Name = nameText
+
+    -- Distance
+    local distText = Drawing.new("Text")
+    distText.Size = 11
+    distText.Center = true
+    distText.Outline = true
+    distText.Color = Color3.fromRGB(200,200,200)
+    distText.Visible = false
+    distText.ZIndex = 6
+    drawings.Distance = distText
+
+    -- Role
+    local roleText = Drawing.new("Text")
+    roleText.Size = 11
+    roleText.Center = true
+    roleText.Outline = true
+    roleText.Visible = false
+    roleText.ZIndex = 6
+    drawings.Role = roleText
+
+    ESPObjects[player] = drawings
+end
+
+local function RemoveESPForPlayer(player)
+    if ESPObjects[player] then
+        for _, drawing in pairs(ESPObjects[player]) do
+            drawing:Remove()
+        end
+        ESPObjects[player] = nil
+    end
+end
+
+local function UpdateESP()
+    for player, drawings in pairs(ESPObjects) do
+        local visible = false
+
+        if Config.ESP.Enabled and player ~= LocalPlayer then
+            local char = GetCharacter(player)
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+
+            if char and root and humanoid and humanoid.Health > 0 then
+                local localRoot = GetRootPart(LocalPlayer)
+                local dist = localRoot and (root.Position - localRoot.Position).Magnitude or 0
+
+                if dist <= Config.ESP.MaxDistance then
+                    local pos, depth, onScreen = WorldToViewport(root.Position)
+
+                    if onScreen and depth > 0 then
+                        visible = true
+
+                        local role = GetRole(player)
+                        local roleColor = GetRoleColor(role)
+
+                        -- Scale box with distance
+                        local scaleFactor = 1 / depth * 1000
+                        local boxW = scaleFactor * 1.8
+                        local boxH = scaleFactor * 5.5
+
+                        local x1 = pos.X - boxW / 2
+                        local y1 = pos.Y - boxH / 2
+                        local x2 = pos.X + boxW / 2
+                        local y2 = pos.Y + boxH / 2
+
+                        -- Box lines
+                        if Config.ESP.ShowBoxes then
+                            local lines = {
+                                {Vector2.new(x1,y1), Vector2.new(x2,y1)},
+                                {Vector2.new(x2,y1), Vector2.new(x2,y2)},
+                                {Vector2.new(x2,y2), Vector2.new(x1,y2)},
+                                {Vector2.new(x1,y2), Vector2.new(x1,y1)},
+                            }
+                            for i = 1, 4 do
+                                drawings["BoxLine"..i].From = lines[i][1]
+                                drawings["BoxLine"..i].To = lines[i][2]
+                                drawings["BoxLine"..i].Color = roleColor
+                                drawings["BoxLine"..i].Visible = true
+                            end
+                        else
+                            for i = 1, 4 do
+                                drawings["BoxLine"..i].Visible = false
+                            end
+                        end
+
+                        -- Name
+                        if Config.ESP.ShowNames then
+                            drawings.Name.Text = player.DisplayName
+                            drawings.Name.Position = Vector2.new(pos.X, y1 - 16)
+                            drawings.Name.Color = roleColor
+                            drawings.Name.Visible = true
+                        else
+                            drawings.Name.Visible = false
+                        end
+
+                        -- Distance
+                        if Config.ESP.ShowDistance then
+                            drawings.Distance.Text = string.format("[%.0fm]", dist)
+                            drawings.Distance.Position = Vector2.new(pos.X, y2 + 2)
+                            drawings.Distance.Visible = true
+                        else
+                            drawings.Distance.Visible = false
+                        end
+
+                        -- Role
+                        if Config.ESP.ShowRole then
+                            drawings.Role.Text = role
+                            drawings.Role.Position = Vector2.new(pos.X, y2 + 14)
+                            drawings.Role.Color = roleColor
+                            drawings.Role.Visible = true
+                        else
+                            drawings.Role.Visible = false
+                        end
+                    end
+                end
+            end
+        end
+
+        if not visible then
+            for _, d in pairs(drawings) do
+                d.Visible = false
+            end
+        end
+    end
+end
+
+-- Init ESP for existing players
+for _, player in ipairs(Players:GetPlayers()) do
+    CreateESPForPlayer(player)
+end
+
+Players.PlayerAdded:Connect(CreateESPForPlayer)
+Players.PlayerRemoving:Connect(RemoveESPForPlayer)
+
+-- ══════════════════════════════════════
+--              SPEEDHACK
+-- ══════════════════════════════════════
+local function ApplySpeed(enabled)
+    local char = GetCharacter(LocalPlayer)
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.WalkSpeed = enabled and Config.SpeedHack.Speed or Config.SpeedHack.DefaultSpeed
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    char:WaitForChild("Humanoid")
+    if Config.SpeedHack.Enabled then
+        task.wait(0.5)
+        ApplySpeed(true)
+    end
+    if Config.Fly.Enabled then
+        task.wait(0.5)
+        EnableFly()
+    end
+end)
+
+-- ══════════════════════════════════════
+--              FLY SYSTEM
+-- ══════════════════════════════════════
+function EnableFly()
+    local char = GetCharacter(LocalPlayer)
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not root or not humanoid then return end
+
+    humanoid.PlatformStand = true
+
+    BodyVelocity = Instance.new("BodyVelocity")
+    BodyVelocity.Velocity = Vector3.zero
+    BodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    BodyVelocity.Parent = root
+
+    BodyGyro = Instance.new("BodyGyro")
+    BodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+    BodyGyro.D = 50
+    BodyGyro.Parent = root
+
+    FlyConnection = RunService.Heartbeat:Connect(function()
+        if not Config.Fly.Enabled then return end
+        local char2 = GetCharacter(LocalPlayer)
+        local root2 = char2 and char2:FindFirstChild("HumanoidRootPart")
+        if not root2 or not BodyVelocity or not BodyVelocity.Parent then return end
+
+        local moveDir = Vector3.zero
+        local camCF = Camera.CFrame
+        local speed = Config.Fly.Speed
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCF.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCF.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveDir = moveDir - Vector3.new(0,1,0) end
+
+        if moveDir.Magnitude > 0 then
+            moveDir = moveDir.Unit
+        end
+
+        BodyVelocity.Velocity = moveDir * speed
+        BodyGyro.CFrame = camCF
+    end)
+end
+
+function DisableFly()
+    if FlyConnection then
+        FlyConnection:Disconnect()
+        FlyConnection = nil
+    end
+    if BodyVelocity then BodyVelocity:Destroy() BodyVelocity = nil end
+    if BodyGyro then BodyGyro:Destroy() BodyGyro = nil end
+
+    local char = GetCharacter(LocalPlayer)
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if humanoid then humanoid.PlatformStand = false end
+end
+
+-- ══════════════════════════════════════
+--              SPINBOT
+-- ══════════════════════════════════════
+local function EnableSpinBot()
+    SpinConnection = RunService.Heartbeat:Connect(function(dt)
+        if not Config.SpinBot.Enabled then return end
+        local char = GetCharacter(LocalPlayer)
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+
+        SpinAngle = (SpinAngle + Config.SpinBot.Speed) % 360
+        root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(SpinAngle), 0)
+    end)
+end
+
+local function DisableSpinBot()
+    if SpinConnection then
+        SpinConnection:Disconnect()
+        SpinConnection = nil
+    end
+end
+
+-- ══════════════════════════════════════
+--              GUI
+-- ══════════════════════════════════════
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AxiomMM2"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 220, 0, 280)
+MainFrame.Position = UDim2.new(0, 10, 0.5, -140)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+
+local Stroke = Instance.new("UIStroke", MainFrame)
+Stroke.Color = Color3.fromRGB(255, 50, 50)
+Stroke.Thickness = 1.5
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 32)
+TitleBar.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, 0, 1, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "AXIOM | MM2"
+TitleLabel.TextColor3 = Color3.fromRGB(255,255,255)
+TitleLabel.TextScaled = true
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Parent = TitleBar
+
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0, 6)
+Layout.Parent = MainFrame
+
+local Padding = Instance.new("UIPadding", MainFrame)
+Padding.PaddingTop = UDim.new(0, 38)
+Padding.PaddingLeft = UDim.new(0, 8)
+Padding.PaddingRight = UDim.new(0, 8)
+
+local function CreateToggle(label, configTable, key, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.BackgroundColor3 = configTable[key]
+        and Color3.fromRGB(255,50,50)
+        or Color3.fromRGB(30,30,30)
+    btn.BorderSizePixel = 0
+    btn.Text = label .. (configTable[key] and "  [ON]" or "  [OFF]")
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 13
+    btn.Parent = MainFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    btn.MouseButton1Click:Connect(function()
+        configTable[key] = not configTable[key]
+        btn.Text = label .. (configTable[key] and "  [ON]" or "  [OFF]")
+        btn.BackgroundColor3 = configTable[key]
+            and Color3.fromRGB(255,50,50)
+            or Color3.fromRGB(30,30,30)
+        if callback then callback(configTable[key]) end
+    end)
+
+    return btn
+end
+
+CreateToggle("ESP", Config.ESP, "Enabled", nil)
+CreateToggle("SpeedHack", Config.SpeedHack, "Enabled", function(state)
+    ApplySpeed(state)
+end)
+CreateToggle("Fly", Config.Fly, "Enabled", function(state)
+    if state then EnableFly() else DisableFly() end
+end)
+CreateToggle("SpinBot", Config.SpinBot, "Enabled", function(state)
+    if state then EnableSpinBot() else DisableSpinBot() end
+end)
+
+-- ══════════════════════════════════════
+--              MAIN LOOP
+-- ══════════════════════════════════════
+RunService.Heartbeat:Connect(function()
+    UpdateESP()
+end)
+
+-- Init SpinBot listener
+EnableSpinBot()
+
+print("[AXIOM MM2] Loaded — ESP / SpeedHack / Fly / SpinBot ready.")
