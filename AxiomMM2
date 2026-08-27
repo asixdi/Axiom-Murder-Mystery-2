@@ -1,10 +1,9 @@
--- MM2 CHEAT SUITE v2 | AXIOM BUILD
--- Rayfield GUI + Fly Fix + ESP Roles Fix
+-- MM2 CHEAT SUITE v3 | AXIOM BUILD
+-- Rayfield GUI + CFrame Fly + BBox ESP
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
@@ -12,9 +11,7 @@ local Camera = workspace.CurrentCamera
 -- ══════════════════════════════════════
 --         RAYFIELD GUI LOADER
 -- ══════════════════════════════════════
-local Rayfield = loadstring(game:HttpGet(
-    "https://sirius.menu/rayfield"
-))()
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
 -- ══════════════════════════════════════
 --              CONFIG
@@ -23,15 +20,6 @@ local Config = {
     ESP = {
         Enabled = true,
         MaxDistance = 800,
-        BoxThickness = 1,
-        TextSize = 11,
-        Colors = {
-            Murder   = Color3.fromRGB(255, 50,  50),
-            Sheriff  = Color3.fromRGB(50,  150, 255),
-            Hero     = Color3.fromRGB(255, 200, 0),
-            Innocent = Color3.fromRGB(50,  255, 100),
-            Unknown  = Color3.fromRGB(180, 180, 180),
-        }
     },
     Speed = {
         Enabled = false,
@@ -40,7 +28,7 @@ local Config = {
     },
     Fly = {
         Enabled = false,
-        Speed   = 80,
+        Speed   = 60,
     },
     SpinBot = {
         Enabled = false,
@@ -61,45 +49,38 @@ local function GetHumanoid(player)
     return c and c:FindFirstChildOfClass("Humanoid")
 end
 
--- MM2 role detection — checks multiple possible locations
-local function GetRole(player)
-    -- Method 1: leaderstats
-    local ls = player:FindFirstChild("leaderstats")
-    if ls then
-        local r = ls:FindFirstChild("Role") or ls:FindFirstChild("role")
-        if r then return tostring(r.Value) end
-    end
-    -- Method 2: direct StringValue children
-    for _, v in ipairs(player:GetChildren()) do
-        local n = v.Name:lower()
-        if n == "role" or n == "mmrole" or n == "playerrole" then
-            return tostring(v.Value)
-        end
-    end
-    -- Method 3: scan character tags
-    local char = player.Character
-    if char then
-        for _, v in ipairs(char:GetChildren()) do
-            local n = v.Name:lower()
-            if n:find("murder") then return "Murder" end
-            if n:find("sheriff") then return "Sheriff" end
-            if n:find("hero") then return "Hero" end
-        end
-    end
-    return "Innocent"
-end
-
 local function NormalizeRole(raw)
     local r = tostring(raw):lower()
     if r:find("murder") or r:find("killer") then return "Murder"   end
     if r:find("sheriff")                     then return "Sheriff"  end
     if r:find("hero")                        then return "Hero"     end
-    if r:find("innocent") or r == ""         then return "Innocent" end
-    return "Unknown"
+    return "Innocent"
 end
 
-local function RoleColor(role)
-    return Config.ESP.Colors[role] or Config.ESP.Colors.Unknown
+local RoleColors = {
+    Murder   = Color3.fromRGB(255, 60,  60),
+    Sheriff  = Color3.fromRGB(60,  140, 255),
+    Hero     = Color3.fromRGB(255, 210, 0),
+    Innocent = Color3.fromRGB(60,  255, 110),
+}
+
+local function GetRole(player)
+    local sources = {
+        player:FindFirstChild("Role"),
+        player:FindFirstChild("mmRole"),
+        player:FindFirstChild("PlayerRole"),
+    }
+    local ls = player:FindFirstChild("leaderstats")
+    if ls then
+        table.insert(sources, ls:FindFirstChild("Role"))
+        table.insert(sources, ls:FindFirstChild("role"))
+    end
+    for _, v in ipairs(sources) do
+        if v and v.Value and v.Value ~= "" then
+            return NormalizeRole(v.Value)
+        end
+    end
+    return "Innocent"
 end
 
 -- ══════════════════════════════════════
@@ -107,135 +88,118 @@ end
 -- ══════════════════════════════════════
 local ESPObjects = {}
 
-local function NewDrawing(type, props)
-    local d = Drawing.new(type)
-    for k, v in pairs(props) do d[k] = v end
-    return d
+local function NewLine()
+    local l = Drawing.new("Line")
+    l.Thickness = 1
+    l.Visible   = false
+    l.ZIndex    = 3
+    return l
+end
+
+local function NewText(size)
+    local t = Drawing.new("Text")
+    t.Size    = size or 11
+    t.Center  = true
+    t.Outline = true
+    t.Visible = false
+    t.ZIndex  = 4
+    return t
 end
 
 local function BuildESP(player)
     if player == LocalPlayer then return end
-    local t = {}
-
-    -- 4 box lines
-    for i = 1, 4 do
-        t["L"..i] = NewDrawing("Line", {
-            Thickness = Config.ESP.BoxThickness,
-            Color     = Color3.fromRGB(255,255,255),
-            Visible   = false,
-            ZIndex    = 4,
-        })
-    end
-
-    t.Name = NewDrawing("Text", {
-        Size    = Config.ESP.TextSize,
-        Center  = true,
-        Outline = true,
-        Color   = Color3.fromRGB(255,255,255),
-        Visible = false,
-        ZIndex  = 5,
-    })
-
-    t.Role = NewDrawing("Text", {
-        Size    = Config.ESP.TextSize,
-        Center  = true,
-        Outline = true,
-        Color   = Color3.fromRGB(255,255,255),
-        Visible = false,
-        ZIndex  = 5,
-    })
-
-    t.Dist = NewDrawing("Text", {
-        Size    = Config.ESP.TextSize - 1,
-        Center  = true,
-        Outline = true,
-        Color   = Color3.fromRGB(200,200,200),
-        Visible = false,
-        ZIndex  = 5,
-    })
-
-    ESPObjects[player] = t
+    ESPObjects[player] = {
+        L1 = NewLine(), L2 = NewLine(),
+        L3 = NewLine(), L4 = NewLine(),
+        Name = NewText(12),
+        Role = NewText(11),
+        Dist = NewText(10),
+    }
 end
 
 local function DestroyESP(player)
-    if ESPObjects[player] then
-        for _, d in pairs(ESPObjects[player]) do d:Remove() end
-        ESPObjects[player] = nil
-    end
+    local t = ESPObjects[player]
+    if not t then return end
+    for _, d in pairs(t) do d:Remove() end
+    ESPObjects[player] = nil
 end
 
-local function HideESP(t)
+local function HideAll(t)
     for _, d in pairs(t) do d.Visible = false end
+end
+
+local function ToScreen(pos)
+    local s, depth = Camera:WorldToScreenPoint(pos)
+    return Vector2.new(s.X, s.Y), depth, depth > 0
+end
+
+local function GetBBox(char)
+    local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+    local anyOnScreen = false
+
+    for _, p in ipairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then
+            local s, d, on = ToScreen(p.Position)
+            if on and d > 0 then
+                anyOnScreen = true
+                if s.X < minX then minX = s.X end
+                if s.Y < minY then minY = s.Y end
+                if s.X > maxX then maxX = s.X end
+                if s.Y > maxY then maxY = s.Y end
+            end
+        end
+    end
+
+    if not anyOnScreen then return nil end
+    local pad = 3
+    return minX - pad, minY - pad, maxX + pad, maxY + pad
 end
 
 local function UpdateESP()
     for player, t in pairs(ESPObjects) do
-        if not Config.ESP.Enabled or player == LocalPlayer then
-            HideESP(t) continue
-        end
+        if not Config.ESP.Enabled then HideAll(t) continue end
 
         local char = player.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local hum  = char and char:FindFirstChildOfClass("Humanoid")
 
         if not (char and root and hum and hum.Health > 0) then
-            HideESP(t) continue
+            HideAll(t) continue
         end
 
-        local localRoot = GetRoot(LocalPlayer)
-        local dist = localRoot and (root.Position - localRoot.Position).Magnitude or 0
+        local lRoot = GetRoot(LocalPlayer)
+        local dist  = lRoot and (root.Position - lRoot.Position).Magnitude or 0
 
-        if dist > Config.ESP.MaxDistance then
-            HideESP(t) continue
-        end
+        if dist > Config.ESP.MaxDistance then HideAll(t) continue end
 
-        local screenPos, depth, onScreen = Camera:WorldToViewportPoint(root.Position)
-        if not onScreen or depth <= 0 then HideESP(t) continue end
+        local x1, y1, x2, y2 = GetBBox(char)
+        if not x1 then HideAll(t) continue end
 
-        local pos2D = Vector2.new(screenPos.X, screenPos.Y)
+        local role  = GetRole(player)
+        local color = RoleColors[role] or RoleColors.Innocent
 
-        -- tighter scale
-        local scale = 1 / depth * 400
-        local bW    = scale * 2
-        local bH    = scale * 6
-
-        local x1 = pos2D.X - bW / 2
-        local y1 = pos2D.Y - bH / 2
-        local x2 = pos2D.X + bW / 2
-        local y2 = pos2D.Y + bH / 2
-
-        local role  = NormalizeRole(GetRole(player))
-        local color = RoleColor(role)
-
-        -- Box
-        local corners = {
-            {Vector2.new(x1,y1), Vector2.new(x2,y1)},
-            {Vector2.new(x2,y1), Vector2.new(x2,y2)},
-            {Vector2.new(x2,y2), Vector2.new(x1,y2)},
-            {Vector2.new(x1,y2), Vector2.new(x1,y1)},
-        }
+        t.L1.From = Vector2.new(x1,y1) t.L1.To = Vector2.new(x2,y1)
+        t.L2.From = Vector2.new(x2,y1) t.L2.To = Vector2.new(x2,y2)
+        t.L3.From = Vector2.new(x2,y2) t.L3.To = Vector2.new(x1,y2)
+        t.L4.From = Vector2.new(x1,y2) t.L4.To = Vector2.new(x1,y1)
         for i = 1, 4 do
-            t["L"..i].From    = corners[i][1]
-            t["L"..i].To      = corners[i][2]
             t["L"..i].Color   = color
             t["L"..i].Visible = true
         end
 
-        -- Name
         t.Name.Text     = player.DisplayName
-        t.Name.Position = Vector2.new(pos2D.X, y1 - 14)
+        t.Name.Position = Vector2.new((x1+x2)/2, y1 - 14)
         t.Name.Color    = color
         t.Name.Visible  = true
 
-        -- Role label
         t.Role.Text     = "["..role.."]"
-        t.Role.Position = Vector2.new(pos2D.X, y2 + 2)
+        t.Role.Position = Vector2.new((x1+x2)/2, y2 + 2)
         t.Role.Color    = color
         t.Role.Visible  = true
 
-        -- Distance
         t.Dist.Text     = string.format("%.0fm", dist)
-        t.Dist.Position = Vector2.new(pos2D.X, y2 + 13)
+        t.Dist.Position = Vector2.new((x1+x2)/2, y2 + 14)
+        t.Dist.Color    = Color3.fromRGB(200, 200, 200)
         t.Dist.Visible  = true
     end
 end
@@ -255,70 +219,45 @@ local function ApplySpeed(state)
 end
 
 -- ══════════════════════════════════════
---         FLY — FIXED MOVEMENT
+--         FLY — CFRAME METHOD
 -- ══════════════════════════════════════
-local FlyConn, BV, BG
+local FlyConn = nil
+local Flying  = false
 
 local function EnableFly()
+    Flying = true
     local char = LocalPlayer.Character
     if not char then return end
-    local root = char:WaitForChild("HumanoidRootPart")
+    local root = char:FindFirstChild("HumanoidRootPart")
     local hum  = char:FindFirstChildOfClass("Humanoid")
     if not root or not hum then return end
 
     hum.PlatformStand = true
 
-    BV = Instance.new("BodyVelocity")
-    BV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
-    BV.Velocity = Vector3.zero
-    BV.Parent   = root
-
-    BG = Instance.new("BodyGyro")
-    BG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
-    BG.D         = 100
-    BG.P         = 10000
-    BG.Parent    = root
-
-    FlyConn = RunService.RenderStepped:Connect(function()
-        if not Config.Fly.Enabled then return end
-        local r2 = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not r2 or not BV or not BV.Parent then return end
+    FlyConn = RunService.RenderStepped:Connect(function(dt)
+        if not Flying then return end
+        local r = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not r then return end
 
         local cf    = Camera.CFrame
         local speed = Config.Fly.Speed
-        local dir   = Vector3.zero
+        local move  = Vector3.zero
 
-        -- WASD + Space/Ctrl mapped correctly
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            dir = dir + Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            dir = dir - Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            dir = dir - Vector3.new(cf.RightVector.X, 0, cf.RightVector.Z)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            dir = dir + Vector3.new(cf.RightVector.X, 0, cf.RightVector.Z)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-            dir = dir + Vector3.new(0, 1, 0)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-            dir = dir - Vector3.new(0, 1, 0)
-        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + cf.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - cf.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move = move - Vector3.new(0,1,0) end
 
-        if dir.Magnitude > 0 then dir = dir.Unit end
-
-        BV.Velocity = dir * speed
-        BG.CFrame   = cf
+        if move.Magnitude > 0 then move = move.Unit end
+        r.CFrame = r.CFrame + (move * speed * dt)
     end)
 end
 
 local function DisableFly()
+    Flying = false
     if FlyConn then FlyConn:Disconnect() FlyConn = nil end
-    if BV then BV:Destroy() BV = nil end
-    if BG then BG:Destroy() BG = nil end
     local hum = GetHumanoid(LocalPlayer)
     if hum then hum.PlatformStand = false end
 end
@@ -334,8 +273,7 @@ local function EnableSpin()
         local root = GetRoot(LocalPlayer)
         if not root then return end
         SpinAngle = (SpinAngle + Config.SpinBot.Speed) % 360
-        root.CFrame = CFrame.new(root.Position)
-            * CFrame.Angles(0, math.rad(SpinAngle), 0)
+        root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(SpinAngle), 0)
     end)
 end
 
@@ -344,21 +282,19 @@ local function DisableSpin()
 end
 
 -- ══════════════════════════════════════
---         RAYFIELD WINDOW BUILD
+--         RAYFIELD WINDOW
 -- ══════════════════════════════════════
 local Window = Rayfield:CreateWindow({
-    Name             = "Axiom | MM2",
-    LoadingTitle     = "Axiom Suite",
-    LoadingSubtitle  = "Murder Mystery 2",
-    Theme            = "Default",
+    Name                   = "Axiom | MM2",
+    LoadingTitle           = "Axiom Suite",
+    LoadingSubtitle        = "Murder Mystery 2",
+    Theme                  = "Default",
     DisableRayfieldPrompts = false,
-    ConfigurationSaving = {
-        Enabled  = false,
-    },
-    KeySystem = false,
+    ConfigurationSaving    = { Enabled = false },
+    KeySystem              = false,
 })
 
--- ── TAB: VISUALS ──────────────────────
+-- VISUALS TAB
 local VisualsTab = Window:CreateTab("👁  Visuals", 4483362458)
 
 VisualsTab:CreateToggle({
@@ -368,7 +304,7 @@ VisualsTab:CreateToggle({
     Callback     = function(v)
         Config.ESP.Enabled = v
         if not v then
-            for _, t in pairs(ESPObjects) do HideESP(t) end
+            for _, t in pairs(ESPObjects) do HideAll(t) end
         end
     end,
 })
@@ -383,7 +319,7 @@ VisualsTab:CreateSlider({
     Callback     = function(v) Config.ESP.MaxDistance = v end,
 })
 
--- ── TAB: MOVEMENT ─────────────────────
+-- MOVEMENT TAB
 local MoveTab = Window:CreateTab("🏃  Movement", 4483362458)
 
 MoveTab:CreateToggle({
@@ -429,7 +365,7 @@ MoveTab:CreateSlider({
     Callback     = function(v) Config.Fly.Speed = v end,
 })
 
--- ── TAB: COMBAT ───────────────────────
+-- COMBAT TAB
 local CombatTab = Window:CreateTab("⚔️  Combat", 4483362458)
 
 CombatTab:CreateToggle({
@@ -453,7 +389,7 @@ CombatTab:CreateSlider({
 })
 
 -- ══════════════════════════════════════
---         CHARACTER RESPAWN HANDLER
+--         RESPAWN HANDLER
 -- ══════════════════════════════════════
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
