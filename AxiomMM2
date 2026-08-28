@@ -135,43 +135,40 @@ end
 local FlyConn, Flying = nil, false
 
 local function EnableFly()
+    Flying = false
+    if FlyConn then FlyConn:Disconnect() FlyConn = nil end
+
     local char = LocalPlayer.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
     local hum  = char:FindFirstChildOfClass("Humanoid")
     if not root or not hum then return end
+
     Flying = true
     hum.PlatformStand = true
-    pcall(function() root:SetNetworkOwner(LocalPlayer) end)
-    local att = root:FindFirstChildOfClass("Attachment") or Instance.new("Attachment", root)
-    local vel = Instance.new("LinearVelocity")
-    vel.MaxForce               = math.huge
-    vel.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-    vel.RelativeTo             = Enum.ActuatorRelativeTo.World
-    vel.Attachment0            = att
-    vel.Parent                 = root
-    local align = Instance.new("AlignOrientation")
-    align.Mode               = Enum.OrientationAlignmentMode.OneAttachment
-    align.Attachment0        = att
-    align.MaxTorque          = math.huge
-    align.MaxAngularVelocity = math.huge
-    align.Responsiveness     = 200
-    align.Parent             = root
-    FlyConn = RunService.RenderStepped:Connect(function()
+
+    local speed = Config.Fly.Speed
+    local lastCF = root.CFrame
+
+    FlyConn = RunService.Heartbeat:Connect(function(dt)
         if not Flying then return end
         local r = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not r or not vel.Parent then return end
+        if not r then return end
+
         local cf   = Camera.CFrame
         local move = Vector3.zero
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += cf.LookVector  end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move -= cf.LookVector  end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move -= cf.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += cf.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space)       then move += Vector3.new(0,1,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0,1,0) end
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + cf.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - cf.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space)       then move = move + Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move = move - Vector3.new(0,1,0) end
+
         if move.Magnitude > 0 then move = move.Unit end
-        vel.VectorVelocity = move * Config.Fly.Speed
-        align.CFrame       = cf
+
+        local newPos = r.CFrame.Position + move * Config.Fly.Speed * dt
+        r.CFrame = CFrame.new(newPos) * (cf - cf.Position)
     end)
 end
 
@@ -179,15 +176,7 @@ local function DisableFly()
     Flying = false
     if FlyConn then FlyConn:Disconnect() FlyConn = nil end
     local char = LocalPlayer.Character
-    if not char then return end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if root then
-        local lv = root:FindFirstChildOfClass("LinearVelocity")
-        local ao = root:FindFirstChildOfClass("AlignOrientation")
-        if lv then lv:Destroy() end
-        if ao then ao:Destroy() end
-    end
-    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
     if hum then hum.PlatformStand = false end
 end
 
@@ -209,107 +198,130 @@ local function DisableSpin()
 end
 
 -- ══════════════════════════════════════
---         VANIXIAN UI LIBRARY
+--           ORION UI LIBRARY
 -- ══════════════════════════════════════
-local VanixianUI = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/Thuan6565/Vanixian-UI-Library/main/source.lua"
+local OrionLib = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/shlexware/Orion/main/source"
 ))()
 
-local Window = VanixianUI:CreateWindow({
-    Title    = "Axiom",
-    SubTitle = "MM2 Suite",
-    Theme    = "Dark",
-    Key      = nil,
+OrionLib:MakeNotification({
+    Name    = "Axiom MM2",
+    Content = "v1.00 Loaded",
+    Time    = 4,
 })
 
-local VisualsTab  = Window:CreateTab({ Name = "Visuals",  Icon = "rbxassetid://7733960981" })
-local MovementTab = Window:CreateTab({ Name = "Movement", Icon = "rbxassetid://7733715400" })
-local CombatTab   = Window:CreateTab({ Name = "Combat",   Icon = "rbxassetid://7734053495" })
+local Window = OrionLib:MakeWindow({
+    Name            = "Axiom  |  MM2",
+    HidePremium     = true,
+    SaveConfig      = false,
+    ConfigFolder    = "AxiomMM2",
+    IntroEnabled    = false,
+})
+
+local VisualsTab  = Window:MakeTab({ Name = "Visuals",  Icon = "rbxassetid://7733960981", PremiumOnly = false })
+local MovementTab = Window:MakeTab({ Name = "Movement", Icon = "rbxassetid://7733715400", PremiumOnly = false })
+local CombatTab   = Window:MakeTab({ Name = "Combat",   Icon = "rbxassetid://7734053495", PremiumOnly = false })
 
 -- VISUALS
-VisualsTab:CreateSection("ESP")
+VisualsTab:AddSection({ Name = "ESP" })
 
-VisualsTab:CreateToggle({
-    Name         = "Player ESP",
-    Default      = Config.ESP.Enabled,
-    Callback     = function(v)
+VisualsTab:AddToggle({
+    Name    = "Player ESP",
+    Default = Config.ESP.Enabled,
+    Save    = false,
+    Flag    = "ESPToggle",
+    Callback = function(v)
         Config.ESP.Enabled = v
         if not v then for _, t in pairs(ESPObjects) do HideAll(t) end end
     end,
 })
 
-VisualsTab:CreateSlider({
-    Name     = "Max Distance",
-    Min      = 50,
-    Max      = 2000,
-    Default  = Config.ESP.MaxDistance,
-    Suffix   = "m",
-    Callback = function(v) Config.ESP.MaxDistance = v end,
+VisualsTab:AddSlider({
+    Name    = "Max Distance",
+    Min     = 50,
+    Max     = 2000,
+    Default = Config.ESP.MaxDistance,
+    Color   = Color3.fromRGB(130, 80, 255),
+    Increment = 50,
+    ValueName = "m",
+    Callback  = function(v) Config.ESP.MaxDistance = v end,
 })
 
 -- MOVEMENT
-MovementTab:CreateSection("Speed")
+MovementTab:AddSection({ Name = "Speed" })
 
-MovementTab:CreateToggle({
+MovementTab:AddToggle({
     Name     = "SpeedHack",
     Default  = Config.Speed.Enabled,
+    Save     = false,
+    Flag     = "SpeedToggle",
     Callback = function(v)
         Config.Speed.Enabled = v
         ApplySpeed(v)
     end,
 })
 
-MovementTab:CreateSlider({
-    Name     = "Walk Speed",
-    Min      = 16,
-    Max      = 250,
-    Default  = Config.Speed.Value,
-    Suffix   = " ws",
-    Callback = function(v)
+MovementTab:AddSlider({
+    Name      = "Walk Speed",
+    Min       = 16,
+    Max       = 250,
+    Default   = Config.Speed.Value,
+    Color     = Color3.fromRGB(130, 80, 255),
+    Increment = 1,
+    ValueName = "ws",
+    Callback  = function(v)
         Config.Speed.Value = v
         if Config.Speed.Enabled then ApplySpeed(true) end
     end,
 })
 
-MovementTab:CreateSection("Fly")
+MovementTab:AddSection({ Name = "Fly" })
 
-MovementTab:CreateToggle({
+MovementTab:AddToggle({
     Name     = "Fly",
     Default  = Config.Fly.Enabled,
+    Save     = false,
+    Flag     = "FlyToggle",
     Callback = function(v)
         Config.Fly.Enabled = v
         if v then EnableFly() else DisableFly() end
     end,
 })
 
-MovementTab:CreateSlider({
-    Name     = "Fly Speed",
-    Min      = 10,
-    Max      = 300,
-    Default  = Config.Fly.Speed,
-    Suffix   = " spd",
-    Callback = function(v) Config.Fly.Speed = v end,
+MovementTab:AddSlider({
+    Name      = "Fly Speed",
+    Min       = 10,
+    Max       = 300,
+    Default   = Config.Fly.Speed,
+    Color     = Color3.fromRGB(130, 80, 255),
+    Increment = 5,
+    ValueName = "spd",
+    Callback  = function(v) Config.Fly.Speed = v end,
 })
 
 -- COMBAT
-CombatTab:CreateSection("Misc")
+CombatTab:AddSection({ Name = "Misc" })
 
-CombatTab:CreateToggle({
+CombatTab:AddToggle({
     Name     = "SpinBot",
     Default  = Config.SpinBot.Enabled,
+    Save     = false,
+    Flag     = "SpinToggle",
     Callback = function(v)
         Config.SpinBot.Enabled = v
         if v then EnableSpin() else DisableSpin() end
     end,
 })
 
-CombatTab:CreateSlider({
-    Name     = "Spin Speed",
-    Min      = 1,
-    Max      = 60,
-    Default  = Config.SpinBot.Speed,
-    Suffix   = " deg",
-    Callback = function(v) Config.SpinBot.Speed = v end,
+CombatTab:AddSlider({
+    Name      = "Spin Speed",
+    Min       = 1,
+    Max       = 60,
+    Default   = Config.SpinBot.Speed,
+    Color     = Color3.fromRGB(130, 80, 255),
+    Increment = 1,
+    ValueName = "deg",
+    Callback  = function(v) Config.SpinBot.Speed = v end,
 })
 
 -- ══════════════════════════════════════
