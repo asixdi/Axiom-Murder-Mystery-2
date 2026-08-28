@@ -1,96 +1,46 @@
--- MM2 CHEAT SUITE v3 | AXIOM BUILD
--- Rayfield GUI + CFrame Fly + BBox ESP
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+local Camera      = workspace.CurrentCamera
 
--- ══════════════════════════════════════
---         RAYFIELD GUI LOADER
--- ══════════════════════════════════════
-local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
-
--- ══════════════════════════════════════
---              CONFIG
--- ══════════════════════════════════════
 local Config = {
-    ESP = {
-        Enabled = true,
-        MaxDistance = 800,
-    },
-    Speed = {
-        Enabled = false,
-        Value   = 50,
-        Default = 16,
-    },
-    Fly = {
-        Enabled = false,
-        Speed   = 60,
-    },
-    SpinBot = {
-        Enabled = false,
-        Speed   = 20,
-    },
+    ESP     = { Enabled = true,  MaxDistance = 800 },
+    Speed   = { Enabled = false, Value = 50, Default = 16 },
+    Fly     = { Enabled = false, Speed = 60 },
+    SpinBot = { Enabled = false, Speed = 20 },
 }
-
--- ══════════════════════════════════════
---              UTILITIES
--- ══════════════════════════════════════
-local function GetRoot(player)
-    local c = player and player.Character
-    return c and c:FindFirstChild("HumanoidRootPart")
-end
-
-local function GetHumanoid(player)
-    local c = player and player.Character
-    return c and c:FindFirstChildOfClass("Humanoid")
-end
-
-local function NormalizeRole(raw)
-    local r = tostring(raw):lower()
-    if r:find("murder") or r:find("killer") then return "Murder"   end
-    if r:find("sheriff")                     then return "Sheriff"  end
-    if r:find("hero")                        then return "Hero"     end
-    return "Innocent"
-end
 
 local RoleColors = {
-    Murder   = Color3.fromRGB(255, 60,  60),
-    Sheriff  = Color3.fromRGB(60,  140, 255),
+    Murder   = Color3.fromRGB(255, 50,  50),
+    Sheriff  = Color3.fromRGB(50,  140, 255),
     Hero     = Color3.fromRGB(255, 210, 0),
-    Innocent = Color3.fromRGB(60,  255, 110),
+    Innocent = Color3.fromRGB(50,  220, 100),
 }
 
-local function GetRole(player)
-    local sources = {
-        player:FindFirstChild("Role"),
-        player:FindFirstChild("mmRole"),
-        player:FindFirstChild("PlayerRole"),
-    }
-    local ls = player:FindFirstChild("leaderstats")
-    if ls then
-        table.insert(sources, ls:FindFirstChild("Role"))
-        table.insert(sources, ls:FindFirstChild("role"))
-    end
-    for _, v in ipairs(sources) do
-        if v and v.Value and v.Value ~= "" then
-            return NormalizeRole(v.Value)
+local function GetRoleByInventory(player)
+    local containers = {}
+    if player.Character then table.insert(containers, player.Character) end
+    local bp = player:FindFirstChildOfClass("Backpack")
+    if bp then table.insert(containers, bp) end
+    for _, container in ipairs(containers) do
+        for _, item in ipairs(container:GetChildren()) do
+            local name = item.Name:lower()
+            if name:find("knife") or name:find("blade") or name:find("murder") then return "Murder" end
+            if name:find("gun") or name:find("sheriff") or name:find("pistol") then return "Sheriff" end
+            if name:find("hero") then return "Hero" end
         end
     end
     return "Innocent"
 end
 
--- ══════════════════════════════════════
---              ESP SYSTEM
--- ══════════════════════════════════════
 local ESPObjects = {}
 
 local function NewLine()
     local l = Drawing.new("Line")
-    l.Thickness = 1
+    l.Thickness = 1.2
     l.Visible   = false
     l.ZIndex    = 3
     return l
@@ -109,11 +59,8 @@ end
 local function BuildESP(player)
     if player == LocalPlayer then return end
     ESPObjects[player] = {
-        L1 = NewLine(), L2 = NewLine(),
-        L3 = NewLine(), L4 = NewLine(),
-        Name = NewText(12),
-        Role = NewText(11),
-        Dist = NewText(10),
+        L1=NewLine(), L2=NewLine(), L3=NewLine(), L4=NewLine(),
+        Name=NewText(12), Role=NewText(11), Dist=NewText(10),
     }
 end
 
@@ -128,20 +75,14 @@ local function HideAll(t)
     for _, d in pairs(t) do d.Visible = false end
 end
 
-local function ToScreen(pos)
-    local s, depth = Camera:WorldToScreenPoint(pos)
-    return Vector2.new(s.X, s.Y), depth, depth > 0
-end
-
 local function GetBBox(char)
     local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
-    local anyOnScreen = false
-
+    local hit = false
     for _, p in ipairs(char:GetDescendants()) do
         if p:IsA("BasePart") then
-            local s, d, on = ToScreen(p.Position)
-            if on and d > 0 then
-                anyOnScreen = true
+            local s, d = Camera:WorldToScreenPoint(p.Position)
+            if d > 0 then
+                hit = true
                 if s.X < minX then minX = s.X end
                 if s.Y < minY then minY = s.Y end
                 if s.X > maxX then maxX = s.X end
@@ -149,58 +90,36 @@ local function GetBBox(char)
             end
         end
     end
-
-    if not anyOnScreen then return nil end
-    local pad = 3
-    return minX - pad, minY - pad, maxX + pad, maxY + pad
+    if not hit then return nil end
+    return minX-4, minY-4, maxX+4, maxY+4
 end
 
 local function UpdateESP()
     for player, t in pairs(ESPObjects) do
         if not Config.ESP.Enabled then HideAll(t) continue end
-
         local char = player.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local hum  = char and char:FindFirstChildOfClass("Humanoid")
-
-        if not (char and root and hum and hum.Health > 0) then
-            HideAll(t) continue
-        end
-
-        local lRoot = GetRoot(LocalPlayer)
+        if not (char and root and hum and hum.Health > 0) then HideAll(t) continue end
+        local lRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         local dist  = lRoot and (root.Position - lRoot.Position).Magnitude or 0
-
         if dist > Config.ESP.MaxDistance then HideAll(t) continue end
-
         local x1, y1, x2, y2 = GetBBox(char)
         if not x1 then HideAll(t) continue end
-
-        local role  = GetRole(player)
-        local color = RoleColors[role] or RoleColors.Innocent
-
-        t.L1.From = Vector2.new(x1,y1) t.L1.To = Vector2.new(x2,y1)
-        t.L2.From = Vector2.new(x2,y1) t.L2.To = Vector2.new(x2,y2)
-        t.L3.From = Vector2.new(x2,y2) t.L3.To = Vector2.new(x1,y2)
-        t.L4.From = Vector2.new(x1,y2) t.L4.To = Vector2.new(x1,y1)
-        for i = 1, 4 do
-            t["L"..i].Color   = color
-            t["L"..i].Visible = true
-        end
-
-        t.Name.Text     = player.DisplayName
-        t.Name.Position = Vector2.new((x1+x2)/2, y1 - 14)
-        t.Name.Color    = color
-        t.Name.Visible  = true
-
-        t.Role.Text     = "["..role.."]"
-        t.Role.Position = Vector2.new((x1+x2)/2, y2 + 2)
-        t.Role.Color    = color
-        t.Role.Visible  = true
-
-        t.Dist.Text     = string.format("%.0fm", dist)
-        t.Dist.Position = Vector2.new((x1+x2)/2, y2 + 14)
-        t.Dist.Color    = Color3.fromRGB(200, 200, 200)
-        t.Dist.Visible  = true
+        local role  = GetRoleByInventory(player)
+        local color = RoleColors[role]
+        local cx    = (x1+x2)/2
+        t.L1.From=Vector2.new(x1,y1) t.L1.To=Vector2.new(x2,y1)
+        t.L2.From=Vector2.new(x2,y1) t.L2.To=Vector2.new(x2,y2)
+        t.L3.From=Vector2.new(x2,y2) t.L3.To=Vector2.new(x1,y2)
+        t.L4.From=Vector2.new(x1,y2) t.L4.To=Vector2.new(x1,y1)
+        for i=1,4 do t["L"..i].Color=color t["L"..i].Visible=true end
+        t.Name.Text=player.DisplayName t.Name.Position=Vector2.new(cx,y1-14)
+        t.Name.Color=color t.Name.Visible=true
+        t.Role.Text="["..role.."]" t.Role.Position=Vector2.new(cx,y2+2)
+        t.Role.Color=color t.Role.Visible=true
+        t.Dist.Text=string.format("%.0fm",dist) t.Dist.Position=Vector2.new(cx,y2+14)
+        t.Dist.Color=Color3.fromRGB(190,190,190) t.Dist.Visible=true
     end
 end
 
@@ -208,69 +127,78 @@ for _, p in ipairs(Players:GetPlayers()) do BuildESP(p) end
 Players.PlayerAdded:Connect(BuildESP)
 Players.PlayerRemoving:Connect(DestroyESP)
 
--- ══════════════════════════════════════
---              SPEED
--- ══════════════════════════════════════
 local function ApplySpeed(state)
-    local hum = GetHumanoid(LocalPlayer)
-    if hum then
-        hum.WalkSpeed = state and Config.Speed.Value or Config.Speed.Default
-    end
+    local char = LocalPlayer.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = state and Config.Speed.Value or Config.Speed.Default end
 end
 
--- ══════════════════════════════════════
---         FLY — CFRAME METHOD
--- ══════════════════════════════════════
-local FlyConn = nil
-local Flying  = false
+local FlyConn, Flying = nil, false
 
 local function EnableFly()
-    Flying = true
     local char = LocalPlayer.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
     local hum  = char:FindFirstChildOfClass("Humanoid")
     if not root or not hum then return end
-
+    Flying = true
     hum.PlatformStand = true
-
-    FlyConn = RunService.RenderStepped:Connect(function(dt)
+    pcall(function() root:SetNetworkOwner(LocalPlayer) end)
+    local att = root:FindFirstChildOfClass("Attachment") or Instance.new("Attachment", root)
+    local vel = Instance.new("LinearVelocity")
+    vel.MaxForce               = math.huge
+    vel.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+    vel.RelativeTo             = Enum.ActuatorRelativeTo.World
+    vel.Attachment0            = att
+    vel.Parent                 = root
+    local align = Instance.new("AlignOrientation")
+    align.Mode               = Enum.OrientationAlignmentMode.OneAttachment
+    align.Attachment0        = att
+    align.MaxTorque          = math.huge
+    align.MaxAngularVelocity = math.huge
+    align.Responsiveness     = 200
+    align.Parent             = root
+    FlyConn = RunService.RenderStepped:Connect(function()
         if not Flying then return end
         local r = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not r then return end
-
+        if not r or not vel.Parent then return end
         local cf    = Camera.CFrame
-        local speed = Config.Fly.Speed
         local move  = Vector3.zero
-
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + cf.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - cf.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - cf.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + cf.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move = move - Vector3.new(0,1,0) end
-
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += cf.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move -= cf.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move -= cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space)       then move += Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0,1,0) end
         if move.Magnitude > 0 then move = move.Unit end
-        r.CFrame = r.CFrame + (move * speed * dt)
+        vel.VectorVelocity = move * Config.Fly.Speed
+        align.CFrame       = cf
     end)
 end
 
 local function DisableFly()
     Flying = false
     if FlyConn then FlyConn:Disconnect() FlyConn = nil end
-    local hum = GetHumanoid(LocalPlayer)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root then
+        local lv = root:FindFirstChildOfClass("LinearVelocity")
+        local ao = root:FindFirstChildOfClass("AlignOrientation")
+        if lv then lv:Destroy() end
+        if ao then ao:Destroy() end
+    end
+    local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then hum.PlatformStand = false end
 end
 
--- ══════════════════════════════════════
---              SPINBOT
--- ══════════════════════════════════════
 local SpinConn, SpinAngle = nil, 0
 
 local function EnableSpin()
     SpinConn = RunService.Heartbeat:Connect(function()
         if not Config.SpinBot.Enabled then return end
-        local root = GetRoot(LocalPlayer)
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
         if not root then return end
         SpinAngle = (SpinAngle + Config.SpinBot.Speed) % 360
         root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(SpinAngle), 0)
@@ -281,131 +209,284 @@ local function DisableSpin()
     if SpinConn then SpinConn:Disconnect() SpinConn = nil end
 end
 
--- ══════════════════════════════════════
---         RAYFIELD WINDOW
--- ══════════════════════════════════════
-local Window = Rayfield:CreateWindow({
-    Name                   = "Axiom | MM2",
-    LoadingTitle           = "Axiom Suite",
-    LoadingSubtitle        = "Murder Mystery 2",
-    Theme                  = "Default",
-    DisableRayfieldPrompts = false,
-    ConfigurationSaving    = { Enabled = false },
-    KeySystem              = false,
+local NL = {
+    BG        = Color3.fromRGB(15,  15,  20),
+    Panel     = Color3.fromRGB(22,  22,  30),
+    Accent    = Color3.fromRGB(130, 80,  255),
+    AccentDim = Color3.fromRGB(80,  50,  160),
+    Text      = Color3.fromRGB(220, 220, 230),
+    SubText   = Color3.fromRGB(130, 130, 150),
+    Toggle    = Color3.fromRGB(35,  35,  48),
+    Line      = Color3.fromRGB(40,  40,  55),
+}
+
+local gui = Instance.new("ScreenGui")
+gui.Name           = "AxiomNL"
+gui.ResetOnSpawn   = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent         = LocalPlayer:WaitForChild("PlayerGui")
+
+local Main = Instance.new("Frame")
+Main.Size             = UDim2.new(0,340,0,420)
+Main.Position         = UDim2.new(0.5,-170,0.5,-210)
+Main.BackgroundColor3 = NL.BG
+Main.BorderSizePixel  = 0
+Main.Active           = true
+Main.Draggable        = true
+Main.ClipsDescendants = true
+Main.Parent           = gui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0,8)
+local MS = Instance.new("UIStroke", Main)
+MS.Color = NL.Accent MS.Thickness = 1.5
+
+local TopBar = Instance.new("Frame")
+TopBar.Size             = UDim2.new(1,0,0,36)
+TopBar.BackgroundColor3 = NL.Panel
+TopBar.BorderSizePixel  = 0
+TopBar.Parent           = Main
+local TG = Instance.new("UIGradient", TopBar)
+TG.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0,   NL.AccentDim),
+    ColorSequenceKeypoint.new(0.5, NL.Accent),
+    ColorSequenceKeypoint.new(1,   NL.AccentDim),
 })
 
--- VISUALS TAB
-local VisualsTab = Window:CreateTab("👁  Visuals", 4483362458)
+local TitleLbl = Instance.new("TextLabel")
+TitleLbl.Size                  = UDim2.new(1,-10,1,0)
+TitleLbl.Position              = UDim2.new(0,10,0,0)
+TitleLbl.BackgroundTransparency= 1
+TitleLbl.Text                  = "AXIOM  //  MM2"
+TitleLbl.TextColor3            = Color3.fromRGB(255,255,255)
+TitleLbl.Font                  = Enum.Font.GothamBold
+TitleLbl.TextSize              = 14
+TitleLbl.TextXAlignment        = Enum.TextXAlignment.Left
+TitleLbl.Parent                = TopBar
 
-VisualsTab:CreateToggle({
-    Name         = "ESP",
-    CurrentValue = Config.ESP.Enabled,
-    Flag         = "ESPToggle",
-    Callback     = function(v)
-        Config.ESP.Enabled = v
-        if not v then
-            for _, t in pairs(ESPObjects) do HideAll(t) end
+local VerLbl = Instance.new("TextLabel")
+VerLbl.Size                   = UDim2.new(0,60,1,0)
+VerLbl.Position               = UDim2.new(1,-65,0,0)
+VerLbl.BackgroundTransparency = 1
+VerLbl.Text                   = "v4.0"
+VerLbl.TextColor3             = NL.SubText
+VerLbl.Font                   = Enum.Font.Gotham
+VerLbl.TextSize               = 11
+VerLbl.TextXAlignment         = Enum.TextXAlignment.Right
+VerLbl.Parent                 = TopBar
+
+local Divider = Instance.new("Frame")
+Divider.Size             = UDim2.new(1,0,0,1)
+Divider.Position         = UDim2.new(0,0,0,36)
+Divider.BackgroundColor3 = NL.Accent
+Divider.BorderSizePixel  = 0
+Divider.Parent           = Main
+
+local TabBar = Instance.new("Frame")
+TabBar.Size             = UDim2.new(1,0,0,32)
+TabBar.Position         = UDim2.new(0,0,0,37)
+TabBar.BackgroundColor3 = NL.Panel
+TabBar.BorderSizePixel  = 0
+TabBar.Parent           = Main
+local TBL = Instance.new("UIListLayout", TabBar)
+TBL.FillDirection = Enum.FillDirection.Horizontal
+TBL.Padding       = UDim.new(0,1)
+TBL.SortOrder     = Enum.SortOrder.LayoutOrder
+
+local Content = Instance.new("Frame")
+Content.Size                   = UDim2.new(1,0,1,-70)
+Content.Position               = UDim2.new(0,0,0,70)
+Content.BackgroundTransparency = 1
+Content.Parent                 = Main
+
+local Tabs, ActiveTab = {}, nil
+
+local function CreateTab(name, icon)
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0,108,1,0)
+    btn.BackgroundColor3 = NL.Panel
+    btn.BorderSizePixel  = 0
+    btn.Text             = icon.." "..name
+    btn.TextColor3       = NL.SubText
+    btn.Font             = Enum.Font.GothamSemibold
+    btn.TextSize         = 12
+    btn.Parent           = TabBar
+    local ind = Instance.new("Frame", btn)
+    ind.Size             = UDim2.new(1,0,0,2)
+    ind.Position         = UDim2.new(0,0,1,-2)
+    ind.BackgroundColor3 = NL.Accent
+    ind.BorderSizePixel  = 0
+    ind.Visible          = false
+    local page = Instance.new("ScrollingFrame")
+    page.Size                = UDim2.new(1,0,1,0)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel     = 0
+    page.ScrollBarThickness  = 3
+    page.ScrollBarImageColor3= NL.Accent
+    page.Visible             = false
+    page.Parent              = Content
+    local pl = Instance.new("UIListLayout", page)
+    pl.Padding   = UDim.new(0,4)
+    pl.SortOrder = Enum.SortOrder.LayoutOrder
+    local pp = Instance.new("UIPadding", page)
+    pp.PaddingTop=UDim.new(0,8) pp.PaddingLeft=UDim.new(0,10)
+    pp.PaddingRight=UDim.new(0,10) pp.PaddingBottom=UDim.new(0,8)
+    pl:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        page.CanvasSize = UDim2.new(0,0,0,pl.AbsoluteContentSize.Y+16)
+    end)
+    local tab = {Btn=btn, Page=page, Ind=ind}
+    table.insert(Tabs, tab)
+    btn.MouseButton1Click:Connect(function()
+        if ActiveTab then
+            ActiveTab.Page.Visible=false
+            ActiveTab.Ind.Visible=false
+            ActiveTab.Btn.TextColor3=NL.SubText
         end
-    end,
-})
+        ActiveTab=tab
+        page.Visible=true ind.Visible=true
+        btn.TextColor3=Color3.fromRGB(255,255,255)
+    end)
+    return page
+end
 
-VisualsTab:CreateSlider({
-    Name         = "ESP Max Distance",
-    Range        = {50, 2000},
-    Increment    = 50,
-    Suffix       = "m",
-    CurrentValue = Config.ESP.MaxDistance,
-    Flag         = "ESPDist",
-    Callback     = function(v) Config.ESP.MaxDistance = v end,
-})
+local function CreateSection(parent, title)
+    local sec = Instance.new("Frame")
+    sec.Size=UDim2.new(1,0,0,22) sec.BackgroundTransparency=1 sec.Parent=parent
+    local lbl = Instance.new("TextLabel", sec)
+    lbl.Size=UDim2.new(1,0,1,0) lbl.BackgroundTransparency=1
+    lbl.Text=title:upper() lbl.TextColor3=NL.Accent
+    lbl.Font=Enum.Font.GothamBold lbl.TextSize=10
+    lbl.TextXAlignment=Enum.TextXAlignment.Left
+    local line = Instance.new("Frame", sec)
+    line.Size=UDim2.new(1,0,0,1) line.Position=UDim2.new(0,0,1,-1)
+    line.BackgroundColor3=NL.Line line.BorderSizePixel=0
+end
 
--- MOVEMENT TAB
-local MoveTab = Window:CreateTab("🏃  Movement", 4483362458)
+local function CreateToggle(parent, label, default, callback)
+    local row = Instance.new("Frame")
+    row.Size=UDim2.new(1,0,0,34) row.BackgroundColor3=NL.Toggle
+    row.BorderSizePixel=0 row.Parent=parent
+    Instance.new("UICorner",row).CornerRadius=UDim.new(0,6)
+    local lbl = Instance.new("TextLabel",row)
+    lbl.Size=UDim2.new(1,-52,1,0) lbl.Position=UDim2.new(0,10,0,0)
+    lbl.BackgroundTransparency=1 lbl.Text=label
+    lbl.TextColor3=NL.Text lbl.Font=Enum.Font.Gotham
+    lbl.TextSize=13 lbl.TextXAlignment=Enum.TextXAlignment.Left
+    local track = Instance.new("Frame",row)
+    track.Size=UDim2.new(0,36,0,18) track.Position=UDim2.new(1,-46,0.5,-9)
+    track.BackgroundColor3=default and NL.Accent or NL.Line
+    track.BorderSizePixel=0
+    Instance.new("UICorner",track).CornerRadius=UDim.new(1,0)
+    local thumb = Instance.new("Frame",track)
+    thumb.Size=UDim2.new(0,14,0,14)
+    thumb.Position=default and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,2,0.5,-7)
+    thumb.BackgroundColor3=Color3.fromRGB(255,255,255) thumb.BorderSizePixel=0
+    Instance.new("UICorner",thumb).CornerRadius=UDim.new(1,0)
+    local state = default
+    local btn = Instance.new("TextButton",row)
+    btn.Size=UDim2.new(1,0,1,0) btn.BackgroundTransparency=1 btn.Text=""
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        TweenService:Create(track,TweenInfo.new(0.15),{BackgroundColor3=state and NL.Accent or NL.Line}):Play()
+        TweenService:Create(thumb,TweenInfo.new(0.15),{Position=state and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,2,0.5,-7)}):Play()
+        callback(state)
+    end)
+end
 
-MoveTab:CreateToggle({
-    Name         = "SpeedHack",
-    CurrentValue = Config.Speed.Enabled,
-    Flag         = "SpeedToggle",
-    Callback     = function(v)
-        Config.Speed.Enabled = v
-        ApplySpeed(v)
-    end,
-})
+local function CreateSlider(parent, label, min, max, default, suffix, callback)
+    local row = Instance.new("Frame")
+    row.Size=UDim2.new(1,0,0,50) row.BackgroundColor3=NL.Toggle
+    row.BorderSizePixel=0 row.Parent=parent
+    Instance.new("UICorner",row).CornerRadius=UDim.new(0,6)
+    local lbl = Instance.new("TextLabel",row)
+    lbl.Size=UDim2.new(0.6,0,0,20) lbl.Position=UDim2.new(0,10,0,5)
+    lbl.BackgroundTransparency=1 lbl.Text=label
+    lbl.TextColor3=NL.Text lbl.Font=Enum.Font.Gotham
+    lbl.TextSize=13 lbl.TextXAlignment=Enum.TextXAlignment.Left
+    local valLbl = Instance.new("TextLabel",row)
+    valLbl.Size=UDim2.new(0.35,0,0,20) valLbl.Position=UDim2.new(0.65,0,0,5)
+    valLbl.BackgroundTransparency=1 valLbl.Text=tostring(default)..(suffix or "")
+    valLbl.TextColor3=NL.Accent valLbl.Font=Enum.Font.GothamBold
+    valLbl.TextSize=13 valLbl.TextXAlignment=Enum.TextXAlignment.Right
+    local track = Instance.new("Frame",row)
+    track.Size=UDim2.new(1,-20,0,4) track.Position=UDim2.new(0,10,0,32)
+    track.BackgroundColor3=NL.Line track.BorderSizePixel=0
+    Instance.new("UICorner",track).CornerRadius=UDim.new(1,0)
+    local fill = Instance.new("Frame",track)
+    fill.Size=UDim2.new((default-min)/(max-min),0,1,0)
+    fill.BackgroundColor3=NL.Accent fill.BorderSizePixel=0
+    Instance.new("UICorner",fill).CornerRadius=UDim.new(1,0)
+    local knob = Instance.new("Frame",track)
+    knob.Size=UDim2.new(0,12,0,12)
+    knob.Position=UDim2.new((default-min)/(max-min),-6,0.5,-6)
+    knob.BackgroundColor3=Color3.fromRGB(255,255,255) knob.BorderSizePixel=0
+    Instance.new("UICorner",knob).CornerRadius=UDim.new(1,0)
+    local dragging = false
+    local function SetValue(absX)
+        local rel=math.clamp((absX-track.AbsolutePosition.X)/track.AbsoluteSize.X,0,1)
+        local value=math.floor(min+(max-min)*rel)
+        fill.Size=UDim2.new(rel,0,1,0)
+        knob.Position=UDim2.new(rel,-6,0.5,-6)
+        valLbl.Text=tostring(value)..(suffix or "")
+        callback(value)
+    end
+    knob.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then SetValue(i.Position.X) end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+    end)
+end
 
-MoveTab:CreateSlider({
-    Name         = "Walk Speed",
-    Range        = {16, 200},
-    Increment    = 1,
-    Suffix       = " ws",
-    CurrentValue = Config.Speed.Value,
-    Flag         = "SpeedVal",
-    Callback     = function(v)
-        Config.Speed.Value = v
-        if Config.Speed.Enabled then ApplySpeed(true) end
-    end,
-})
+local VisualsPage  = CreateTab("Visuals",  "👁")
+local MovementPage = CreateTab("Movement", "🏃")
+local CombatPage   = CreateTab("Combat",   "⚔️")
 
-MoveTab:CreateToggle({
-    Name         = "Fly",
-    CurrentValue = Config.Fly.Enabled,
-    Flag         = "FlyToggle",
-    Callback     = function(v)
-        Config.Fly.Enabled = v
-        if v then EnableFly() else DisableFly() end
-    end,
-})
+Tabs[1].Page.Visible=true Tabs[1].Ind.Visible=true
+Tabs[1].Btn.TextColor3=Color3.fromRGB(255,255,255)
+ActiveTab=Tabs[1]
 
-MoveTab:CreateSlider({
-    Name         = "Fly Speed",
-    Range        = {10, 300},
-    Increment    = 5,
-    Suffix       = " spd",
-    CurrentValue = Config.Fly.Speed,
-    Flag         = "FlySpeed",
-    Callback     = function(v) Config.Fly.Speed = v end,
-})
+CreateSection(VisualsPage, "ESP Settings")
+CreateToggle(VisualsPage, "Player ESP", Config.ESP.Enabled, function(v)
+    Config.ESP.Enabled = v
+    if not v then for _, t in pairs(ESPObjects) do HideAll(t) end end
+end)
+CreateSlider(VisualsPage, "Max Distance", 50, 2000, Config.ESP.MaxDistance, "m", function(v)
+    Config.ESP.MaxDistance = v
+end)
 
--- COMBAT TAB
-local CombatTab = Window:CreateTab("⚔️  Combat", 4483362458)
+CreateSection(MovementPage, "Speed")
+CreateToggle(MovementPage, "SpeedHack", Config.Speed.Enabled, function(v)
+    Config.Speed.Enabled = v ApplySpeed(v)
+end)
+CreateSlider(MovementPage, "Walk Speed", 16, 250, Config.Speed.Value, " ws", function(v)
+    Config.Speed.Value = v
+    if Config.Speed.Enabled then ApplySpeed(true) end
+end)
+CreateSection(MovementPage, "Fly")
+CreateToggle(MovementPage, "Fly Mode", Config.Fly.Enabled, function(v)
+    Config.Fly.Enabled = v
+    if v then EnableFly() else DisableFly() end
+end)
+CreateSlider(MovementPage, "Fly Speed", 10, 300, Config.Fly.Speed, " spd", function(v)
+    Config.Fly.Speed = v
+end)
 
-CombatTab:CreateToggle({
-    Name         = "SpinBot",
-    CurrentValue = Config.SpinBot.Enabled,
-    Flag         = "SpinToggle",
-    Callback     = function(v)
-        Config.SpinBot.Enabled = v
-        if v then EnableSpin() else DisableSpin() end
-    end,
-})
+CreateSection(CombatPage, "Misc")
+CreateToggle(CombatPage, "SpinBot", Config.SpinBot.Enabled, function(v)
+    Config.SpinBot.Enabled = v
+    if v then EnableSpin() else DisableSpin() end
+end)
+CreateSlider(CombatPage, "Spin Speed", 1, 60, Config.SpinBot.Speed, " deg", function(v)
+    Config.SpinBot.Speed = v
+end)
 
-CombatTab:CreateSlider({
-    Name         = "Spin Speed",
-    Range        = {5, 60},
-    Increment    = 1,
-    Suffix       = " deg",
-    CurrentValue = Config.SpinBot.Speed,
-    Flag         = "SpinSpeed",
-    Callback     = function(v) Config.SpinBot.Speed = v end,
-})
-
--- ══════════════════════════════════════
---         RESPAWN HANDLER
--- ══════════════════════════════════════
 LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(0.5)
+    task.wait(0.6)
     if Config.Speed.Enabled then ApplySpeed(true) end
     if Config.Fly.Enabled   then EnableFly()      end
 end)
 
--- ══════════════════════════════════════
---              MAIN LOOP
--- ══════════════════════════════════════
 RunService.Heartbeat:Connect(UpdateESP)
 EnableSpin()
-
-Rayfield:Notify({
-    Title    = "Axiom MM2",
-    Content  = "Loaded — ESP / Speed / Fly / SpinBot",
-    Duration = 4,
-    Image    = 4483362458,
-})
